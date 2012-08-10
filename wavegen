@@ -1,0 +1,257 @@
+#!/bin/bash
+
+freq=440
+wavtype=
+
+printhelp()
+{
+    cat >&2 <<EOM
+Usage: $0 [-f freq] [-t type]
+
+The following types are accepted:
+        ,-.
+sin:   /   \   /
+            \`-'
+        __    __
+sq:    |  |__|  |__
+        _     _
+sq2:   | |___| |___
+        _
+       | |_   _
+sq3:       |_|
+       __    __
+sq4:   ||____||____
+        /\\
+tri:   /  \\  /
+           \\/
+       |\\
+tril:  | \\ |
+          \\|
+        /|
+trir:  / | /
+         |/
+       ,.
+oval: /  \  /
+          \`'
+        _._
+pbola: /   \_ _/
+             '
+The output is signed 16 bit little endian, rate 44100Hz, stereo raw audio.
+
+Use \`$0 | aplay -f cd' to play the sound, and press ^C to stop it.
+WARNING: ADJUST YOUR VOLUME DOWN IN ORDER NOT TO HURT YOUR EARS!
+EOM
+}
+
+if [ $# -lt 1 ]
+then
+    printhelp
+    exit
+fi
+
+while getopts f:t: flag
+do
+    case "$flag" in
+        f)
+            freq="$OPTARG";;
+        t)
+            wavtype="$OPTARG";;
+        ?)
+            printhelp
+            exit
+            ;;
+        *)
+            printhelp
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$freq" -lt 32 ]
+then
+    echo Frequency too low!>&2
+    exit 1
+fi
+
+if [ "$freq" -gt 22050 ]
+then
+    echo Frequency too high!>&2
+    exit 1
+fi
+
+itoe()
+{
+    hex=$(echo "obase=16; $1/1+65536" | bc)
+    printf '\\x%s\\x%s' ${hex:${#hex}-2:2} ${hex:${#hex}-4:2}
+}
+
+echo -n Generating wave pattern...>&2
+
+case "$wavtype" in
+    sin)
+        let len=44100/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            t=$(echo "s($i*8*a(1)/$len)*32767" | bc -l)
+            t=$(itoe $t)
+            cyc="$cyc$t$t"
+        done
+        ;;
+    sq)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            cyc="${cyc}\xff\x1f\xff\x1f"
+        done
+        for i in $(seq "$len")
+        do
+            cyc="${cyc}\x01\xe0\x01\xe0"
+        done
+        ;;
+    sq2)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq $(($len/2)))
+        do
+            cyc="${cyc}\xff\x1f\xff\x1f"
+        done
+        for i in $(seq $(($len*3/2)))
+        do
+            cyc="${cyc}\x01\xe0\x01\xe0"
+        done
+        ;;
+    sq3)
+        let len=11025/"$freq"
+        cyc=
+        for i in $(seq $len)
+        do
+            cyc="${cyc}\xff\x1f\xff\x1f"
+        done
+        for i in $(seq $len)
+        do
+            cyc="${cyc}\x00\x00\x00\x00"
+        done
+        for i in $(seq $len)
+        do
+            cyc="${cyc}\x01\xe0\x01\xe0"
+        done
+        for i in $(seq $len)
+        do
+            cyc="${cyc}\x00\x00\x00\x00"
+        done
+        ;;
+    sq4)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq $(($len/4)))
+        do
+            cyc="${cyc}\xff\x1f\xff\x1f"
+        done
+        for i in $(seq $(($len*7/4)))
+        do
+            cyc="${cyc}\x01\xe0\x01\xe0"
+        done
+        ;;
+    tri)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq $((11025/$freq)))
+        do
+            t=$(echo "$i*65534/$len" | bc)
+            t=$(itoe $t)
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq "$len")
+        do
+            t=$(echo "32767-$i*65534/$len" | bc)
+            t=$(itoe $t)
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq $((11025/$freq)))
+        do
+            t=$(echo "$i*65534/$len-32767" | bc)
+            t=$(itoe $t)
+            cyc="$cyc$t$t"
+        done
+        ;;
+    tril)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            t=$(echo "-$i*16383/$len" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq "$len")
+        do
+            t=$(echo "16383-$i*16383/$len" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        ;;
+    trir)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            t=$(echo "$i*16383/$len" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq "$len")
+        do
+            t=$(echo "$i*16383/$len-16383" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        ;;
+    oval)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            t=$(echo "scale=20;32767*sqrt(1-($i*2/$len-1)^2)" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq "$len")
+        do
+            t=$(echo "scale=20;-32767*sqrt(1-($i*2/$len-1)^2)" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        ;;
+    pbola)
+        let len=22050/"$freq"
+        cyc=
+        for i in $(seq "$len")
+        do
+            t=$(echo "scale=20;-131068*$i*($i-$len)/$len^2" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        for i in $(seq "$len")
+        do
+            t=$(echo "scale=20;131068*$i*($i-$len)/$len^2" | bc)
+            t=$(itoe "$t")
+            cyc="$cyc$t$t"
+        done
+        ;;
+    *)
+        cat >&2 <<EOM
+Failed!
+Fatal: Unsupported wave type, type \`$0' to see help.
+EOM
+        exit 1
+        ;;
+esac
+
+echo OK.>&2
+
+while true
+do
+    echo -ne $cyc$cyc$cyc$cyc$cyc$cyc$cyc$cyc
+done
